@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "tictactoe-rl-qtables"
+packages = [{ include = "src" }]
+version = "0.1.0"
+description = "This repository implements a reinforcement learning approach to playing Tic-Tac-Toe using two Q-learning agents, each with its own Q-table."
+authors = ["Patrick Kalkman <patrick@simpletechture.nl>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+gymnasium = "^1.0.0"
+pygame = "^2.6.1"
+matplotlib = "^3.9.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
