@@ -83,5 +83,5 @@ class PygameRenderer:
     def _update_display(self) -> None:
         pygame.display.flip()
 
-    def cleanup(self) -> None:
+    def close(self) -> None:
         pygame.quit()

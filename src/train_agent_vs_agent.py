@@ -1,111 +1,172 @@
+from dataclasses import dataclass
+from typing import Dict, Optional
 import time
 import pygame
+
 from q_learning_agent import QLearningAgent, AgentConfig
 from tictactoe_env import TicTacToeEnv
 
-# Initialize environment and two agents
-env = TicTacToeEnv(render_mode="human")
 
-config = AgentConfig(
-    learning_rate=0.2,
-    discount_factor=0.99,
-    exploration_rate=1.0,
-    exploration_decay=0.99995,
-    initial_q_value=0.0,
-)
-agent_X = QLearningAgent(env.action_space, config)
-agent_O = QLearningAgent(env.action_space, config)
+@dataclass
+class TrainingConfig:
+    episodes: int = 500_000
+    render_interval: int = 100_000
+    stats_interval: int = 1_000
+    render_delay: float = 0.5
+    end_episode_delay: float = 1.0
 
-num_episodes = 600_000
-render_interval = 100_000
-win_count_X = 0
-win_count_O = 0
-draw_count = 0
 
-for episode in range(num_episodes):
-    obs, _ = env.reset()
-    done = False
-    state = obs["board"]
-    last_agent_X_state = None
-    last_agent_X_action = None
-    last_agent_O_state = None
-    last_agent_O_action = None
+class GameState:
+    def __init__(self, state: str, action: Optional[int] = None):
+        self.board = state
+        self.action = action
 
-    render_this_episode = episode % render_interval == 0
-    current_player = obs["current_player"]
 
-    while not done:
-        if render_this_episode:
-            env.render()
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    done = True
-                    pygame.quit()
-                    exit()
+class TrainingStats:
+    def __init__(self):
+        self.wins_x = 0
+        self.wins_o = 0
+        self.draws = 0
 
-        current_agent = agent_X if current_player == "X" else agent_O
-
-        action = current_agent.choose_action(state)
-        if current_player == "X":
-            last_agent_X_state = state
-            last_agent_X_action = action
-        else:
-            last_agent_O_state = state
-            last_agent_O_action = action
-
-        obs_next, reward, done, truncated, info = env.step(action)
-        next_state = obs_next["board"]
-
-        if current_player == "X":
-            agent_X.update(state, action, reward, next_state, done)
-        else:  # O's turn
-            agent_O.update(state, action, reward, next_state, done)
-
-        # Handle game end
-        if done and reward != 0:
+    def update(self, reward: float, current_player: str) -> None:
+        if reward > 0:
             if current_player == "X":
-                agent_X.update(state, action, reward, next_state, done)
-                agent_O.update(
-                    last_agent_O_state, last_agent_O_action, -reward, next_state, done
-                )
+                self.wins_x += 1
             else:
-                agent_O.update(state, action, -reward, next_state, done)
-                agent_X.update(
-                    last_agent_X_state, last_agent_X_action, reward, next_state, done
-                )
+                self.wins_o += 1
+        elif reward == 0:
+            self.draws += 1
 
-        if render_this_episode:
-            time.sleep(0.5)
-
-        current_player = obs_next["current_player"]
-
-        state = next_state
-
-    if render_this_episode:
-        env.render()
-        time.sleep(1.0)
-
-    if reward > 0:  # Win
-        if current_player == "X":
-            win_count_X += 1
-        else:
-            win_count_O += 1
-    elif reward == 0:  # Draw
-        draw_count += 1
-
-    agent_X.decay_exploration()
-    agent_O.decay_exploration()
-
-    # Print progress
-    if episode % 1000 == 0:
+    def print_progress(
+        self, episode: int, agent_x: QLearningAgent, agent_o: QLearningAgent
+    ) -> None:
         print(f"\nEpisode {episode}")
         print(
-            f"Agent X Wins: {win_count_X}, Agent O Wins: {win_count_O}, Draws: {draw_count}"
+            f"Agent X Wins: {self.wins_x}, Agent O Wins: {self.wins_o}, Draws: {self.draws}"
         )
-        print(f"X Exploration Rate: {agent_X.exploration_rate:.3f}")
-        print(f"O Exploration Rate: {agent_O.exploration_rate:.3f}")
+        print(f"X Exploration Rate: {agent_x.exploration_rate:.3f}")
+        print(f"O Exploration Rate: {agent_o.exploration_rate:.3f}")
 
-agent_X.print_board_values()
-agent_O.print_board_values()
 
-env.close()
+class DualAgentTrainer:
+    def __init__(
+        self,
+        env: TicTacToeEnv,
+        agent_x: QLearningAgent,
+        agent_o: QLearningAgent,
+        config: TrainingConfig,
+    ):
+        self.env = env
+        self.agents: Dict[str, QLearningAgent] = {"X": agent_x, "O": agent_o}
+        self.config = config
+        self.stats = TrainingStats()
+
+    def train(self) -> None:
+        for episode in range(self.config.episodes):
+            self.run_episode(episode)
+
+    def run_episode(self, episode: int) -> None:
+        obs, _ = self.env.reset()
+        state = obs["board"]
+        current_player = obs["current_player"]
+        last_moves = {"X": GameState(state), "O": GameState(state)}
+        done = False
+
+        render_this_episode = episode % self.config.render_interval == 0
+
+        while not done:
+            if render_this_episode:
+                self.render_and_check_quit()
+
+            current_agent = self.agents[current_player]
+            action = current_agent.choose_action(state)
+
+            last_moves[current_player] = GameState(state, action)
+
+            obs_next, reward, done, _, _ = self.env.step(action)
+            next_state = obs_next["board"]
+
+            self.update_agents(
+                current_player, last_moves, state, action, reward, next_state, done
+            )
+
+            if render_this_episode:
+                time.sleep(self.config.render_delay)
+
+            current_player = obs_next["current_player"]
+            state = next_state
+
+        if render_this_episode:
+            self.env.render()
+            time.sleep(self.config.end_episode_delay)
+
+        self.stats.update(reward, current_player)
+
+        for agent in self.agents.values():
+            agent.decay_exploration()
+
+        if episode % self.config.stats_interval == 0:
+            self.stats.print_progress(episode, self.agents["X"], self.agents["O"])
+
+    def update_agents(
+        self,
+        current_player: str,
+        last_moves: Dict[str, GameState],
+        state: str,
+        action: int,
+        reward: float,
+        next_state: str,
+        done: bool,
+    ) -> None:
+        current_agent = self.agents[current_player]
+        other_player = "O" if current_player == "X" else "X"
+        other_agent = self.agents[other_player]
+
+        # Update current agent
+        current_agent.update(state, action, reward, next_state, done)
+
+        # If game is over with a winner, update the other agent
+        if done and reward != 0:
+            other_last_move = last_moves[other_player]
+            if other_last_move.action is not None:
+                other_agent.update(
+                    other_last_move.board,
+                    other_last_move.action,
+                    -reward,
+                    next_state,
+                    done,
+                )
+
+    def render_and_check_quit(self) -> None:
+        self.env.render()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+
+
+def main():
+    env = TicTacToeEnv(render_mode="human")
+
+    agent_config = AgentConfig(
+        learning_rate=0.1,
+        discount_factor=0.99,
+        exploration_rate=1.0,
+        exploration_decay=0.999995,
+        initial_q_value=0.0,
+    )
+
+    agent_x = QLearningAgent(env.action_space, agent_config)
+    agent_o = QLearningAgent(env.action_space, agent_config)
+
+    training_config = TrainingConfig()
+    trainer = DualAgentTrainer(env, agent_x, agent_o, training_config)
+
+    try:
+        trainer.train()
+    finally:
+        env.close()
+
+
+if __name__ == "__main__":
+    main()
