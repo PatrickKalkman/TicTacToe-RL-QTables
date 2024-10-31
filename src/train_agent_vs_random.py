@@ -1,96 +1,126 @@
-import gymnasium as gym
-import tictactoe_env
 import time
 import pygame
+import random
+from q_learning_agent import QLearningAgent, AgentConfig
+from tictactoe_env import TicTacToeEnv
 
-from q_learning_agent import QLearningAgent
+env = TicTacToeEnv(render_mode="human")
 
-# Initialize environment and two agents
-env = gym.make("tictactoe-v0", render_mode="human")  # Use "human" mode for visual rendering
-agent_X = QLearningAgent(env.action_space, exploration_decay=0.9995)
+config = AgentConfig(
+    learning_rate=0.2,
+    discount_factor=0.99,
+    exploration_rate=1.0,
+    exploration_decay=0.99995,
+    initial_q_value=0.0,
+)
+agent_X = QLearningAgent(env.action_space, config)
 
-# Training parameters
-num_episodes = 100000
-render_interval = 5000
-win_count_X, draw_count = 0, 0
-invalid_count = 0
+num_episodes = 1_000_000
+render_interval = 100_000
+win_count_X = 0
+win_count_O = 0
+draw_count = 0
+window_size = 2000
+
+recent_results = []
+
+
+def get_random_valid_move(board_state):
+    valid_moves = [i for i, val in enumerate(board_state) if val == "-"]
+    return random.choice(valid_moves) if valid_moves else 0
+
 
 for episode in range(num_episodes):
-    (state, current_player), _ = env.reset()
-    if episode % 2 == 0:
-        current_player = 1  # Agent starts
-    else:
-        current_player = -1  # Random opponent starts
-
+    obs, _ = env.reset()
     done = False
-    episode_reward_X = 0  # Track rewards for each agent
+    state = obs["board"]
+    last_agent_state = None
+    last_agent_action = None
 
-    # Decide whether to render this episode
     render_this_episode = episode % render_interval == 0
-    invalid = False
-    invalid_attempts = 0
+    current_player = obs["current_player"]
+
     while not done:
         if render_this_episode:
             env.render()
-
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     done = True
                     pygame.quit()
                     exit()
 
-        # Choose the agent based on the current player
-        if current_player == 1:
-            action = agent_X.choose_action(str(state))
+        if current_player == "X":
+            action = agent_X.choose_action(state)
+            last_agent_state = state
+            last_agent_action = action
         else:
-            action = env.action_space.sample()
+            action = get_random_valid_move(state)
 
-        # Step through the environment
-        (next_state, current_player), reward, done, truncated, info = env.step(action)
+        obs_next, reward, done, truncated, info = env.step(action)
+        next_state = obs_next["board"]
 
-        # If the move was invalid, heavily penalize the current player
-        if "invalid" in info and info["invalid"]:
-            invalid_count += 1
-            invalid_attempts += 1
+        if current_player == "X":
+            agent_X.update(state, action, reward, next_state, done)
 
-            if invalid_attempts > 10:  # Reset the game if stuck in repeated invalid moves
-                done = True
-                break
+        if done:
+            if reward == 1 and current_player == "X":
+                recent_results.append("X")
+            elif reward == 1 and current_player == "O":
+                recent_results.append("O")
+                agent_X.update(
+                    last_agent_state, last_agent_action, -reward, next_state, done
+                )
+            elif reward == 0:
+                recent_results.append("D")
+                agent_X.update(
+                    last_agent_state, last_agent_action, reward, next_state, done
+                )
 
-            # Penalize the current agent but don't switch players yet
-            if current_player == 1:
-                agent_X.update_q_value(str(state), action, reward, str(next_state), done)
-
-            continue  # Give the player another chance without switching turns
-
-        # Update Q-tables for each agent based on their role if move was valid
-        if current_player == 1:  # Agent X just played
-            agent_X.update_q_value(str(state), action, reward, str(next_state), done)
-            episode_reward_X += reward
-
-        # Add a delay for visibility
         if render_this_episode:
-            time.sleep(0.2)  # Adjust delay as desired
+            time.sleep(0.3)
 
-        current_player = -current_player
+        current_player = obs_next["current_player"]
+
         state = next_state
 
     if render_this_episode:
-        print(f"Episode {episode} | Reward: {episode_reward_X} | Invalid moves: {invalid_count}")
-        env.render()  # Display the final board
-        time.sleep(1)  # Add a delay before resetting the environment
+        env.render()
+        time.sleep(1.0)
 
-    # Track win/loss/draw based on final reward
-    if current_player == 1 and reward == 10:  # Agent X wins
-        win_count_X += 1
-    elif reward == 0:  # Draw
+    if reward > 0:
+        if current_player == "X":
+            win_count_X += 1
+        else:
+            win_count_O += 1
+    elif reward == 0:
         draw_count += 1
 
-    # Decay exploration rates for both agents
     agent_X.decay_exploration()
 
+    if len(recent_results) > window_size:
+        recent_results.pop(0)
+
+    # Print progress
     if episode % 1000 == 0:
-        print(f"Episode {episode}")
-        print(f"Agent X Wins: {win_count_X}, Draws: {draw_count}")
+        recent_X_wins = recent_results.count("X")
+        recent_O_wins = recent_results.count("O")
+        recent_draws = recent_results.count("D")
+
+        overall_win_rate = (win_count_X / (episode + 1)) * 100
+        recent_win_rate = (recent_X_wins / len(recent_results)) * 100
+
+        print(f"\nEpisode {episode}")
+        print(
+            f"Overall - Agent X Wins: {win_count_X}, Agent O Wins: {win_count_O}, Draws: {draw_count}"
+        )
+        print(f"Overall Win Rate: {overall_win_rate:.1f}%")
+        print(
+            f"Recent Win Rate (last {len(recent_results)} games): {recent_win_rate:.1f}%"
+        )
+        print(
+            f"Recent - X Wins: {recent_X_wins}, O Wins: {recent_O_wins}, Draws: {recent_draws}"
+        )
+        print(f"X Exploration Rate: {agent_X.exploration_rate:.3f}")
+
 
 env.close()

@@ -1,106 +1,111 @@
-import gymnasium as gym
-import tictactoe_env
 import time
 import pygame
-
-from q_learning_agent import QLearningAgent
+from q_learning_agent import QLearningAgent, AgentConfig
+from tictactoe_env import TicTacToeEnv
 
 # Initialize environment and two agents
-env = gym.make("tictactoe-v0", render_mode="human")  # Use "human" mode for visual rendering
-agent_X = QLearningAgent(env.action_space, exploration_decay=0.999)
-agent_O = QLearningAgent(env.action_space, exploration_decay=0.999)
+env = TicTacToeEnv(render_mode="human")
 
-# Training parameters
-num_episodes = 500000
-render_interval = 5000
+config = AgentConfig(
+    learning_rate=0.2,
+    discount_factor=0.99,
+    exploration_rate=1.0,
+    exploration_decay=0.99995,
+    initial_q_value=0.0,
+)
+agent_X = QLearningAgent(env.action_space, config)
+agent_O = QLearningAgent(env.action_space, config)
+
+num_episodes = 600_000
+render_interval = 100_000
 win_count_X = 0
 win_count_O = 0
 draw_count = 0
-invalid_count = 0
 
 for episode in range(num_episodes):
-    (state, current_player), _ = env.reset(seed=episode)
-
+    obs, _ = env.reset()
     done = False
-    episode_reward_X = 0
-    episode_reward_O = 0
+    state = obs["board"]
+    last_agent_X_state = None
+    last_agent_X_action = None
+    last_agent_O_state = None
+    last_agent_O_action = None
 
-    # Decide whether to render this episode
     render_this_episode = episode % render_interval == 0
-    invalid = False
-    invalid_attempts = 0
+    current_player = obs["current_player"]
+
     while not done:
         if render_this_episode:
             env.render()
-
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     done = True
                     pygame.quit()
                     exit()
 
-        # Choose the agent based on the current player
-        if current_player == 1:
-            action = agent_X.choose_action(str(state))
+        current_agent = agent_X if current_player == "X" else agent_O
+
+        action = current_agent.choose_action(state)
+        if current_player == "X":
+            last_agent_X_state = state
+            last_agent_X_action = action
         else:
-            action = agent_O.choose_action(str(state))
+            last_agent_O_state = state
+            last_agent_O_action = action
 
-        # Step through the environment
-        (next_state, current_player), reward, done, truncated, info = env.step(action)
+        obs_next, reward, done, truncated, info = env.step(action)
+        next_state = obs_next["board"]
 
-        # If the move was invalid, heavily penalize the current player
-        if "invalid" in info and info["invalid"]:
-            invalid_count += 1
-            invalid_attempts += 1
+        if current_player == "X":
+            agent_X.update(state, action, reward, next_state, done)
+        else:  # O's turn
+            agent_O.update(state, action, reward, next_state, done)
 
-            if invalid_attempts > 10:  # Reset the game if stuck in repeated invalid moves
-                done = True
-                break
-
-            # Penalize the current agent but don't switch players yet
-            if current_player == 1:
-                agent_X.update_q_value(str(state), action, reward, str(next_state), done)
+        # Handle game end
+        if done and reward != 0:
+            if current_player == "X":
+                agent_X.update(state, action, reward, next_state, done)
+                agent_O.update(
+                    last_agent_O_state, last_agent_O_action, -reward, next_state, done
+                )
             else:
-                agent_O.update_q_value(str(state), action, reward, str(next_state), done)
+                agent_O.update(state, action, -reward, next_state, done)
+                agent_X.update(
+                    last_agent_X_state, last_agent_X_action, reward, next_state, done
+                )
 
-            continue  # Give the player another chance without switching turns
-
-        # Update Q-tables for each agent based on their role if move was valid
-        if current_player == 1:  # Agent X just played
-            agent_X.update_q_value(str(state), action, reward, str(next_state), done)
-            episode_reward_X += reward
-        else:
-            agent_O.update_q_value(str(state), action, reward, str(next_state), done)
-            episode_reward_O += reward
-
-        # Add a delay for visibility
         if render_this_episode:
-            time.sleep(0.1)  # Adjust delay as desired
+            time.sleep(0.5)
+
+        current_player = obs_next["current_player"]
 
         state = next_state
 
     if render_this_episode:
-        print(f"Episode {episode} | Reward X: {episode_reward_X} | Invalid moves: {invalid_count}")
-        print(f"Episode {episode} | Reward O: {episode_reward_O} | Invalid moves: {invalid_count}")
-        env.render()  # Display the final board
-        time.sleep(0.5)  # Add a delay before resetting the environment
+        env.render()
+        time.sleep(1.0)
 
-    # Track win/loss/draw based on final reward
-    if reward == 10:
-        if current_player == 1:
+    if reward > 0:  # Win
+        if current_player == "X":
             win_count_X += 1
         else:
             win_count_O += 1
     elif reward == 0:  # Draw
         draw_count += 1
 
-    # Decay exploration rates for both agents
     agent_X.decay_exploration()
     agent_O.decay_exploration()
 
-    if episode % 5000 == 0:
-        print(f"Episode {episode}")
-        print(f"Agent X Wins: {win_count_X}, Agent O Wins: {win_count_O} Draws: {draw_count}")
-        agent_X.render_q_table()
+    # Print progress
+    if episode % 1000 == 0:
+        print(f"\nEpisode {episode}")
+        print(
+            f"Agent X Wins: {win_count_X}, Agent O Wins: {win_count_O}, Draws: {draw_count}"
+        )
+        print(f"X Exploration Rate: {agent_X.exploration_rate:.3f}")
+        print(f"O Exploration Rate: {agent_O.exploration_rate:.3f}")
+
+agent_X.print_board_values()
+agent_O.print_board_values()
 
 env.close()

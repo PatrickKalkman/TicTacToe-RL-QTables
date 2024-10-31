@@ -1,83 +1,127 @@
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Dict, List, Literal, Tuple, Optional
 import random
+
 import gymnasium as gym
 from gymnasium import spaces
-import numpy as np
 import pygame
-
 from pygame_renderer import PygameRenderer
+
+
+class Player(str, Enum):
+    X_SYMBOL = "X"
+    O_SYMBOL = "O"
+    EMPTY = "-"
+
+
+@dataclass
+class GameState:
+    board: str
+    current_player: Player
+    done: bool = False
+
+
+class WinningPatterns:
+    ROWS = [(0, 1, 2), (3, 4, 5), (6, 7, 8)]
+    COLUMNS = [(0, 3, 6), (1, 4, 7), (2, 5, 8)]
+    DIAGONALS = [(0, 4, 8), (2, 4, 6)]
+
+    @classmethod
+    def all_patterns(cls) -> List[Tuple[int, int, int]]:
+        return cls.ROWS + cls.COLUMNS + cls.DIAGONALS
 
 
 class TicTacToeEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, render_mode="human"):
-        super(TicTacToeEnv, self).__init__()
-        self.renderer = PygameRenderer(window_size=300)
+    def __init__(self, render_mode: Literal["human", "rgb_array"] = "human"):
+        super().__init__()
+        self.renderer = PygameRenderer()
         self.render_mode = render_mode
 
-        # Observation space includes the board and the current player
-        self.observation_space = spaces.Tuple((
-            spaces.Box(low=-1, high=1, shape=(9,), dtype=np.int8),
-            spaces.Discrete(2)  # 0 for -1 (O) and 1 for 1 (X)
-        ))
+        self.observation_space = spaces.Dict(
+            {
+                "board": spaces.Text(min_length=9, max_length=9, charset="XO-"),
+                "current_player": spaces.Discrete(2),
+            }
+        )
         self.action_space = spaces.Discrete(9)
 
-        self.state = np.zeros(9, dtype=np.int8)
-        self.current_player = 1
-        self.done = False
+        self.state = self._create_initial_state()
 
-    def reset(self, seed=None, options=None):
+    def _create_initial_state(self) -> GameState:
+        return GameState(
+            board=Player.EMPTY * 9, current_player=Player.X_SYMBOL, done=False
+        )
+
+    def reset(
+        self, seed: Optional[int] = None, options: Optional[Dict] = None
+    ) -> Tuple[Dict[str, Any], Dict]:
         super().reset(seed=seed)
-        self.state = np.zeros(9, dtype=np.int8)
-        self.current_player = random.choice([1, -1])  # Randomly choose between player 1 (X) and player -1 (O)
-        self.done = False
-        return (self.state, self.current_player), {}
+        self.state = self._create_initial_state()
+        self.state.current_player = random.choice([Player.X_SYMBOL, Player.O_SYMBOL])
 
-    def step(self, action):
-        if self.state[action] != 0:
-            return (self.state, self.current_player), -5, False, False, {"invalid": True}
+        return self._get_observation(), {}
 
-        # Place the current player's mark and check the game state
-        self.state[action] = self.current_player
-        reward, self.done = self._check_game_status()
+    def step(self, action: int) -> Tuple[Dict[str, Any], float, bool, bool, Dict]:
+        if self._is_valid_move(action):
+            self._make_move(action)
+            reward, self.state.done = self._evaluate_game_state()
 
-        # Switch players if game continues
-        if not self.done:
-            self.current_player = -self.current_player
+            if not self.state.done:
+                self._switch_player()
 
-        return (self.state, self.current_player), reward, self.done, False, {}
+            return self._get_observation(), reward, self.state.done, False, {}
 
-    def _check_game_status(self):
-        winning_combinations = [
-            [0, 1, 2], [3, 4, 5], [6, 7, 8],  # Rows
-            [0, 3, 6], [1, 4, 7], [2, 5, 8],  # Columns
-            [0, 4, 8], [2, 4, 6]              # Diagonals
-        ]
+        return self._get_observation(), -1, True, False, {}
 
-        for combo in winning_combinations:
-            if abs(self.state[combo[0]] + self.state[combo[1]] + self.state[combo[2]]) == 3:
-                return 10, True
+    def _is_valid_move(self, action: int) -> bool:
+        return list(self.state.board)[action] == Player.EMPTY
 
-        # Check for a draw
-        if 0 not in self.state:
-            return 0, True  # Draw
+    def _make_move(self, action: int) -> None:
+        board_list = list(self.state.board)
+        board_list[action] = self.state.current_player
+        self.state.board = "".join(board_list)
 
-        return -1, False
+    def _switch_player(self) -> None:
+        self.state.current_player = (
+            Player.O_SYMBOL
+            if self.state.current_player == Player.X_SYMBOL
+            else Player.X_SYMBOL
+        )
 
-    def render(self):
-        if self.render_mode == "human":
-            self.renderer.draw_board(self.state)
-        elif self.render_mode == "rgb_array":
-            self.renderer.draw_board(self.state)
+    def _evaluate_game_state(self) -> Tuple[float, bool]:
+        for combo in WinningPatterns.all_patterns():
+            line = "".join(self.state.board[i] for i in combo)
+            if line in ("XXX", "OOO"):
+                return 1, True
+
+        if Player.EMPTY not in self.state.board:
+            return 0, True
+
+        return 0, False
+
+    def _get_observation(self) -> Dict[str, Any]:
+        return {
+            "board": self.state.board,
+            "current_player": self.state.current_player,
+        }
+
+    def render(self) -> Optional[Any]:
+        self.renderer.render_game_state(self.state.board)
+        if self.render_mode == "rgb_array":
             return pygame.surfarray.array3d(self.renderer.screen).transpose(1, 0, 2)
+        return None
 
-    def close(self):
+    def close(self) -> None:
         self.renderer.close()
 
 
+# Register the environment with Gymnasium
 from gymnasium.envs.registration import register
 
 register(
-    id='tictactoe-v0',
-    entry_point='tictactoe_env:TicTacToeEnv',
+    id="tictactoe-v0",
+    entry_point="tictactoe_env:TicTacToeEnv",
 )

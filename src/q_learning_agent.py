@@ -1,44 +1,91 @@
-import numpy as np
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 import random
-from collections import defaultdict
+from gymnasium.spaces import Discrete
+
+
+@dataclass
+class AgentConfig:
+    learning_rate: float = 0.1
+    discount_factor: float = 0.95
+    exploration_rate: float = 1.0
+    exploration_decay: float = 0.9995
+    min_exploration_rate: float = 0.01
+    initial_q_value: float = 0.01
 
 
 class QLearningAgent:
-    def __init__(self, action_space, learning_rate=0.2, discount_factor=0.9, exploration_rate=1.0, exploration_decay=0.9999):
-        self.action_space = action_space
-        self.learning_rate = learning_rate
-        self.discount_factor = discount_factor
-        self.exploration_rate = exploration_rate
-        self.exploration_decay = exploration_decay
-        self.q_table = defaultdict(lambda: np.random.uniform(-0.01, 0.01, action_space.n)) 
+    def __init__(self, action_space: Discrete, config: Optional[AgentConfig] = None):
+        self.action_space_size = action_space.n
+        self.config = config or AgentConfig()
+        self.q_table: Dict[str, Tuple[float, ...]] = {}
+        self.exploration_rate = self.config.exploration_rate
+        self.player_symbol: Optional[str] = None
 
-    def choose_action(self, state):
-        """Choose an action based on epsilon-greedy policy."""
+    def find_available_moves(self, state: str) -> List[int]:
+        return [i for i, val in enumerate(state) if val == "-"]
+
+    def initialize_state_values(self, state: str) -> None:
+        if state not in self.q_table:
+            self.q_table[state] = tuple(
+                self.config.initial_q_value for _ in range(self.action_space_size)
+            )
+
+    def select_best_move(self, state: str, available_moves: List[int]) -> int:
+        q_values = self.q_table[state]
+        move_values = [(move, q_values[move]) for move in available_moves]
+
+        highest_value = max(move_values, key=lambda x: x[1] + random.uniform(0, 1e-6))[
+            1
+        ]
+
+        threshold = 1e-6
+        optimal_moves = [
+            move
+            for move, value in move_values
+            if abs(value - highest_value) < threshold
+        ]
+
+        return random.choice(optimal_moves)
+
+    def choose_action(self, state: str) -> int:
+        available_moves = self.find_available_moves(state)
+        if not available_moves:
+            return 0
+
+        self.initialize_state_values(state)
+
         if random.uniform(0, 1) < self.exploration_rate:
-            return self.action_space.sample()  # Explore
-        else:
-            q_values = self.q_table[state]
-            max_q_value = np.max(q_values)
-            best_actions = [action for action, value in enumerate(q_values) if value == max_q_value]
-            return random.choice(best_actions)  # Randomly pick among the best
+            return random.choice(available_moves)
 
-    def update_q_value(self, state, action, reward, next_state, done=False):
-        """Update Q-value based on the action taken and received reward."""
+        return self.select_best_move(state, available_moves)
+
+    def update(
+        self, state: str, action: int, reward: float, next_state: str, done: bool
+    ) -> None:
+        self.initialize_state_values(state)
+        self.initialize_state_values(next_state)
+
+        current_value = self.q_table[state][action]
+
         if done:
-            td_target = reward
+            target_value = reward
         else:
-            best_next_action = np.argmax(self.q_table[next_state])
-            td_target = reward + self.discount_factor * self.q_table[next_state][best_next_action]
-        td_delta = td_target - self.q_table[state][action]
-        self.q_table[state][action] += self.learning_rate * td_delta
+            available_moves = self.find_available_moves(next_state)
+            future_values = [self.q_table[next_state][move] for move in available_moves]
+            max_future_value = max(future_values) if future_values else 0
+            target_value = reward + self.config.discount_factor * max_future_value
 
-    def decay_exploration(self, min_exploration_rate=0.1):
-        """Decay the exploration rate after each episode."""
-        self.exploration_rate = max(min_exploration_rate, self.exploration_rate * self.exploration_decay)
+        updated_value = current_value + self.config.learning_rate * (
+            target_value - current_value
+        )
 
-    def render_q_table(self):
-        """Print the Q-table for debugging purposes."""
-        for state, action_values in self.q_table.items():
-            print(f"State: {state}")
-            for action, value in enumerate(action_values):
-                print(f"  Action {action}: {value}")
+        state_values = list(self.q_table[state])
+        state_values[action] = updated_value
+        self.q_table[state] = tuple(state_values)
+
+    def decay_exploration(self) -> None:
+        self.exploration_rate = max(
+            self.config.min_exploration_rate,
+            self.exploration_rate * self.config.exploration_decay,
+        )
