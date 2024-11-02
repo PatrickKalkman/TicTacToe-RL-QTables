@@ -12,6 +12,7 @@ python = "^3.12"
 gymnasium = "^1.0.0"
 pygame = "^2.6.1"
 matplotlib = "^3.9.2"
+seaborn = "^0.13.2"
 
 [build-system]
 requires = ["poetry-core"]

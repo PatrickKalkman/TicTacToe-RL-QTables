@@ -34,10 +34,7 @@ class QLearningAgent:
     def select_best_move(self, state: str, available_moves: List[int]) -> int:
         q_values = self.q_table[state]
         move_values = [(move, q_values[move]) for move in available_moves]
-
-        highest_value = max(move_values, key=lambda x: x[1] + random.uniform(0, 1e-6))[
-            1
-        ]
+        highest_value = max(move_values, key=lambda x: x[1] + random.uniform(0, 1e-6))[1]
 
         threshold = 1e-6
         optimal_moves = [
@@ -60,9 +57,7 @@ class QLearningAgent:
 
         return self.select_best_move(state, available_moves)
 
-    def update(
-        self, state: str, action: int, reward: float, next_state: str, done: bool
-    ) -> None:
+    def update(self, state: str, action: int, reward: float, next_state: str, done: bool) -> None:
         self.initialize_state_values(state)
         self.initialize_state_values(next_state)
 
@@ -76,9 +71,7 @@ class QLearningAgent:
             max_future_value = max(future_values) if future_values else 0
             target_value = reward + self.config.discount_factor * max_future_value
 
-        updated_value = current_value + self.config.learning_rate * (
-            target_value - current_value
-        )
+        updated_value = current_value + self.config.learning_rate * (target_value - current_value)
 
         state_values = list(self.q_table[state])
         state_values[action] = updated_value

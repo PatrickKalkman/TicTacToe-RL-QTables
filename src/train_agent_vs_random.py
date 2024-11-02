@@ -3,6 +3,8 @@ from typing import List, Tuple, Optional
 import time
 import pygame
 import random
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from q_learning_agent import QLearningAgent, AgentConfig
 from tictactoe_env import TicTacToeEnv
@@ -16,6 +18,7 @@ class TrainingConfig:
     window_size: int = 1_000
     render_delay: float = 0.3
     end_episode_delay: float = 1.0
+    plot_interval: int = 10_000
 
 
 class TrainingStats:
@@ -25,6 +28,12 @@ class TrainingStats:
         self.wins_x = 0
         self.wins_o = 0
         self.draws = 0
+
+        # Lists to store data for plotting
+        self.episodes: List[int] = []
+        self.overall_winrates: List[float] = []
+        self.recent_winrates: List[float] = []
+        self.exploration_rates: List[float] = []
 
     def update(self, winner: str) -> None:
         self.recent_results.append(winner)
@@ -42,9 +51,13 @@ class TrainingStats:
         recent_x_wins = self.recent_results.count("X")
         total_episodes = episode + 1
 
-        overall_winrate = (self.wins_x / total_episodes) * 100
-        recent_winrate = (recent_x_wins / len(self.recent_results)) * 100
+        # Only calculate rates if we have enough games
+        if len(self.recent_results) < self.window_size:
+            recent_winrate = 0.0
+        else:
+            recent_winrate = (recent_x_wins / len(self.recent_results)) * 100
 
+        overall_winrate = (self.wins_x / total_episodes) * 100
         return overall_winrate, recent_winrate
 
     def get_recent_counts(self) -> Tuple[int, int, int]:
@@ -63,6 +76,22 @@ class TicTacToeTrainer:
         self.agent = agent
         self.config = config
         self.stats = TrainingStats(config.window_size)
+
+        # Initialize matplotlib plot with style
+        sns.set_style("whitegrid")  # Use seaborn's whitegrid style
+        plt.ion()  # Enable interactive mode
+        self.fig, ((self.ax1, self.ax2), (self.ax3, self.ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+        self.fig.patch.set_facecolor('#f0f0f0')  # Light gray background
+        self.setup_plots()
+
+    def setup_plots(self):
+        for ax in [self.ax1, self.ax2, self.ax3, self.ax4]:
+            ax.set_facecolor('white')
+            ax.spines['bottom'].set_color('#666666')
+            ax.spines['top'].set_color('#666666')
+            ax.spines['right'].set_color('#666666')
+            ax.spines['left'].set_color('#666666')
+            ax.tick_params(colors='#666666')
 
     def select_action(
         self, state: str, current_player: str
@@ -111,6 +140,9 @@ class TicTacToeTrainer:
         print(f"Recent Win (last {len(self.stats.recent_results)}): {recent_wr:.1f}%")
         print(f"Recent - X W: {recent_x}, O W: {recent_o}, Dr: {recent_d}")
         print(f"X Exploration Rate: {self.agent.exploration_rate:.3f}")
+
+        # Update plots
+        self.update_plots(episode)
 
     def train(self) -> None:
         for episode in range(self.config.episodes):
@@ -161,6 +193,85 @@ class TicTacToeTrainer:
                 pygame.quit()
                 exit()
 
+    def update_plots(self, episode: int):
+        if episode % self.config.plot_interval != 0:
+            return
+
+        if episode < self.config.window_size:
+            return
+
+        overall_wr, recent_wr = self.stats.get_stats(episode)
+        recent_x, recent_o, recent_d = self.stats.get_recent_counts()
+
+        # Store data for plotting
+        self.stats.episodes.append(episode)
+        self.stats.overall_winrates.append(overall_wr)
+        self.stats.recent_winrates.append(recent_wr)
+        self.stats.exploration_rates.append(self.agent.exploration_rate)
+        
+        # Clear all plots
+        self.ax1.clear()
+        self.ax2.clear()
+        self.ax3.clear()
+        self.ax4.clear()
+
+        # Plot 1: Win rates
+        self.ax1.plot(self.stats.episodes, self.stats.overall_winrates, 
+                    label='Overall Win Rate', color='#2ecc71', linewidth=2)
+        self.ax1.plot(self.stats.episodes, self.stats.recent_winrates,
+                    label=f'Recent Win Rate (Window={self.config.window_size})',
+                    color='#3498db', linewidth=2)
+        self.ax1.set_ylim([0, 100])
+        self.ax1.set_xlabel('Episodes', fontsize=10, color='#666666')
+        self.ax1.set_ylabel('Win Rate (%)', fontsize=10, color='#666666')
+        self.ax1.legend(frameon=True, facecolor='white', framealpha=0.9)
+        self.ax1.grid(True, linestyle='--', alpha=0.7)
+        self.ax1.set_title('Win Rates Over Time', pad=15, fontsize=12, color='#444444')
+
+        # Plot 2: Exploration rate
+        self.ax2.plot(self.stats.episodes, self.stats.exploration_rates, 
+                    color='#e74c3c', linewidth=2, label='Exploration Rate')
+        self.ax2.set_ylim([0, 1])
+        self.ax2.set_xlabel('Episodes', fontsize=10, color='#666666')
+        self.ax2.set_ylabel('Rate', fontsize=10, color='#666666')
+        self.ax2.legend(frameon=True, facecolor='white', framealpha=0.9)
+        self.ax2.grid(True, linestyle='--', alpha=0.7)
+        self.ax2.set_title('Exploration Rate Over Time', pad=15, fontsize=12, color='#444444')
+
+        # Plot 3: Game outcomes distribution
+        outcomes = ['X Wins', 'O Wins', 'Draws']
+        counts = [recent_x, recent_o, recent_d]
+        colors = ['#3498db', '#e74c3c', '#95a5a6']
+        bars = self.ax3.bar(outcomes, counts, color=colors)
+        self.ax3.set_title(f'Recent Game Outcomes\n(Last {self.config.window_size} games)', 
+                        pad=15, fontsize=12, color='#444444')
+        self.ax3.set_ylabel('Count', fontsize=10, color='#666666')
+        self.ax3.grid(True, linestyle='--', alpha=0.7, axis='y')
+        
+        # Add value labels on top of bars
+        for bar in bars:
+            height = bar.get_height()
+            self.ax3.text(bar.get_x() + bar.get_width()/2., height,
+                        f'{int(height)}',
+                        ha='center', va='bottom')
+
+        # Plot 4: Moving average of rewards
+        window_size = min(100, len(self.stats.overall_winrates))
+        if window_size > 0:
+            moving_avg = [sum(self.stats.overall_winrates[max(0, i-window_size):i])/
+                        min(i, window_size) for i in range(1, len(self.stats.overall_winrates)+1)]
+            self.ax4.plot(self.stats.episodes, moving_avg, 
+                        color='#9b59b6', linewidth=2, 
+                        label=f'Moving Avg (Window={window_size})')
+            self.ax4.set_xlabel('Episodes', fontsize=10, color='#666666')
+            self.ax4.set_ylabel('Average Win Rate', fontsize=10, color='#666666')
+            self.ax4.legend(frameon=True, facecolor='white', framealpha=0.9)
+            self.ax4.grid(True, linestyle='--', alpha=0.7)
+            self.ax4.set_title('Moving Average Win Rate', pad=15, fontsize=12, color='#444444')
+
+        plt.tight_layout()
+        plt.draw()
+        plt.pause(0.01)
 
 def main():
     env = TicTacToeEnv(render_mode="human")
