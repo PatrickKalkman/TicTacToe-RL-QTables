@@ -40,41 +40,30 @@ class TicTacToeEnv(gym.Env):
         self.renderer = PygameRenderer()
         self.render_mode = render_mode
 
-        self.observation_space = spaces.Dict(
-            {
-                "board": spaces.Text(min_length=9, max_length=9, charset="XO-"),
-                "current_player": spaces.Discrete(2),
-            }
-        )
+        self.observation_space = spaces.Dict({
+            "board": spaces.Text(min_length=9, max_length=9, charset="XO-"),
+            "current_player": spaces.Discrete(2)})
         self.action_space = spaces.Discrete(9)
 
         self.state = self._create_initial_state()
 
-    def _create_initial_state(self) -> GameState:
-        return GameState(
-            board=Player.EMPTY * 9, current_player=Player.X_SYMBOL, done=False
-        )
-
-    def reset(
-        self, seed: Optional[int] = None, options: Optional[Dict] = None
-    ) -> Tuple[Dict[str, Any], Dict]:
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[Dict[str, Any], Dict]:
         super().reset(seed=seed)
         self.state = self._create_initial_state()
         self.state.current_player = random.choice([Player.X_SYMBOL, Player.O_SYMBOL])
-
         return self._get_observation(), {}
 
     def step(self, action: int) -> Tuple[Dict[str, Any], float, bool, bool, Dict]:
         if self._is_valid_move(action):
             self._make_move(action)
             reward, self.state.done = self._evaluate_game_state()
-
             if not self.state.done:
                 self._switch_player()
-
             return self._get_observation(), reward, self.state.done, False, {}
-
         return self._get_observation(), -1, True, False, {}
+
+    def _create_initial_state(self) -> GameState:
+        return GameState(board=Player.EMPTY * 9, current_player=Player.X_SYMBOL, done=False)
 
     def _is_valid_move(self, action: int) -> bool:
         return list(self.state.board)[action] == Player.EMPTY
@@ -103,10 +92,8 @@ class TicTacToeEnv(gym.Env):
         return 0, False
 
     def _get_observation(self) -> Dict[str, Any]:
-        return {
-            "board": self.state.board,
-            "current_player": self.state.current_player,
-        }
+        return {"board": self.state.board,
+                "current_player": self.state.current_player}
 
     def render(self) -> Optional[Any]:
         self.renderer.render_game_state(self.state.board)
@@ -118,10 +105,5 @@ class TicTacToeEnv(gym.Env):
         self.renderer.close()
 
 
-# Register the environment with Gymnasium
 from gymnasium.envs.registration import register
-
-register(
-    id="tictactoe-v0",
-    entry_point="tictactoe_env:TicTacToeEnv",
-)
+register(id="tictactoe-v0", entry_point="tictactoe_env:TicTacToeEnv")
