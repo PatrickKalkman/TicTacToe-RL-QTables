@@ -4,7 +4,7 @@
 
 This repository contains the code for a Q-learning implementation of Tic-Tac-Toe, demonstrating fundamental principles of reinforcement learning through self-play and training against random opponents.
 
-Read the full article: [How Did AlphaGo Beat Lee Sedol? From AlphaGo to Tic-Tac-Toe: Building Your First AI Game Player](https://medium.com/pkalkman)
+Read the full article: [How Did AlphaGo Beat Lee Sedol? From AlphaGo to Tic-Tac-Toe: Building Your First AI Game Player](https://medium.com/ai-advances/how-did-alphago-beat-lee-sedol-1a160d76612b)
 
 ## Features
 
